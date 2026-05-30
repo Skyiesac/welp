@@ -1,0 +1,14 @@
+# Compiled binaries
+errfix
+welp
+
+# Generic Go binary outputs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# If you decide to add local environment configuration files later
+.env
+.env.local

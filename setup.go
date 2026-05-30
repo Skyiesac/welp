@@ -1,0 +1,218 @@
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"net/http"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"welp/providers"
+)
+
+func printSetupInstructions() {
+	fmt.Println("\n⚠️  No working AI provider configured.")
+	fmt.Println("Set up one of the following, then run `welp setup` again:")
+	fmt.Println("  1. GitHub Copilot: run `gh auth login` or export GH_TOKEN")
+	fmt.Println("  2. Ollama (local): https://ollama.ai")
+	fmt.Println("  3. LocalAI (local): https://localai.io")
+	fmt.Println("  4. Claude Desktop: https://claude.ai/")
+	fmt.Println("  5. API keys for Anthropic, OpenAI, or Gemini")
+}
+
+func finalizeSetup(config *providers.Config, providerName string) bool {
+	provider, err := providers.CreateProvider(providerName)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return false
+	}
+	if err := provider.ValidateAPIKeyWithConfig(config); err != nil {
+		fmt.Printf("\n⚠️  %s is not ready: %v\n", provider.GetName(), err)
+		printSetupInstructions()
+		return false
+	}
+
+	config.DefaultProvider = providerName
+	if err := saveConfig(config); err != nil {
+		fmt.Printf("Error saving configuration: %v\n", err)
+		return false
+	}
+
+	fmt.Printf("\n✓ Default provider set to %s\n", providerName)
+	fmt.Printf("✓ Configuration saved to %s\n", getConfigPath())
+	fmt.Println("\n✓ Setup complete! You can now use welp.")
+	return true
+}
+
+// runSetup handles the interactive setup process
+func runSetup() {
+	config := loadConfig()
+	if config.Providers == nil {
+		config.Providers = make(map[string]string)
+	}
+
+	fmt.Println("\n=== welp Setup ===\n")
+	if exe, err := os.Executable(); err == nil {
+		fmt.Printf("Binary: %s\n", exe)
+		fmt.Println("(Run `./install.sh` after `go build` to update ~/.local/bin/welp)\n")
+	}
+	fmt.Println("Scanning for available AI tools...\n")
+
+	selectedProvider := ""
+
+	// 1. Check for GitHub Copilot first (most common)
+	fmt.Println("🔍 Checking for GitHub Copilot...")
+	if providers.IsGitHubCopilotAvailable() {
+		fmt.Println("✓ GitHub Copilot API configuration detected!")
+		if promptYesNo("  Use GitHub Copilot for welp? (y/n): ") {
+			selectedProvider = "copilot"
+		}
+	} else {
+		fmt.Println("✗ GitHub Copilot API configuration not found")
+		fmt.Println("  Authenticate first:")
+		fmt.Println("    gh auth login")
+		fmt.Println("  Or export a token:")
+		fmt.Println("    export GH_TOKEN=<your-github-token>")
+		fmt.Println()
+	}
+
+	// 2. Check for Claude Desktop
+	if selectedProvider == "" {
+		fmt.Println("🔍 Checking for Claude Desktop...")
+		if isClaudeDesktopFound() {
+			fmt.Println("✓ Claude Desktop detected!")
+			if promptYesNo("  Use Claude Desktop for welp? (y/n): ") {
+				selectedProvider = "claude-desktop"
+			}
+		} else {
+			fmt.Println("✗ Claude Desktop not found")
+			fmt.Println("  Install from: https://claude.ai/\n")
+		}
+	}
+
+	// 3. Check for LocalAI
+	if selectedProvider == "" {
+		fmt.Println("🔍 Checking for LocalAI...")
+		if isLocalAIFound() {
+			fmt.Println("✓ LocalAI detected (running on localhost:8080)!")
+			if promptYesNo("  Use LocalAI for welp? (y/n): ") {
+				selectedProvider = "localai"
+			}
+		} else {
+			fmt.Println("✗ LocalAI not found")
+			fmt.Println("  Install from: https://localai.io/\n")
+		}
+	}
+
+	// 4. Check for Ollama
+	if selectedProvider == "" {
+		fmt.Println("🔍 Checking for Ollama...")
+		if isOllamaFound() {
+			fmt.Println("✓ Ollama detected (running on localhost:11434)!")
+			if promptYesNo("  Use Ollama for welp? (y/n): ") {
+				selectedProvider = "ollama"
+			}
+		} else {
+			fmt.Println("✗ Ollama not found")
+			fmt.Println("  Install from: https://ollama.ai/\n")
+		}
+	}
+
+	if selectedProvider != "" {
+		finalizeSetup(config, selectedProvider)
+		return
+	}
+
+	// 5. Ask for API keys if no local provider was selected
+	fmt.Println("🔑 No local AI source selected. Configuring API keys...\n")
+
+	apiProviders := []string{"anthropic", "openai", "gemini"}
+	addedAny := false
+	firstAdded := ""
+
+	for _, provider := range apiProviders {
+		fmt.Printf("Enter API key for %s (press Enter to skip): ", strings.ToUpper(provider))
+		key := readInput()
+
+		if key != "" {
+			config.Providers[provider] = key
+			fmt.Printf("✓ %s API key saved\n", strings.ToUpper(provider))
+			if !addedAny {
+				firstAdded = provider
+			}
+			addedAny = true
+		}
+	}
+
+	if !addedAny {
+		printSetupInstructions()
+		return
+	}
+
+	finalizeSetup(config, firstAdded)
+}
+
+// readInput reads a line from stdin (for setup)
+func readInput() string {
+	reader := bufio.NewReader(os.Stdin)
+	text, _ := reader.ReadString('\n')
+	return strings.TrimSpace(text)
+}
+
+// promptYesNo asks the user a yes/no question
+func promptYesNo(question string) bool {
+	fmt.Print(question)
+	response := readInput()
+	return strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
+}
+
+// isClaudeDesktopFound checks if Claude Desktop CLI is available
+func isClaudeDesktopFound() bool {
+	_, err := exec.LookPath("claude")
+	if err == nil {
+		return true
+	}
+
+	// Check common installation paths
+	home, _ := os.UserHomeDir()
+	paths := []string{
+		"claude",
+		"/Applications/Claude.app/Contents/MacOS/claude",
+		home + "/.local/share/claude-desktop/bin/claude",
+	}
+
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// isLocalAIFound checks if LocalAI is running
+func isLocalAIFound() bool {
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+	}
+	resp, err := client.Get("http://localhost:8080/v1/models")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized
+}
+
+// isOllamaFound checks if Ollama is running
+func isOllamaFound() bool {
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+	}
+	resp, err := client.Get("http://localhost:11434/api/tags")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
