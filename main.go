@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"welp/providers"
 )
@@ -34,9 +35,8 @@ func isConfigured(config *providers.Config) bool {
 }
 
 func main() {
-	fmt.Print(banner)
-
 	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		fmt.Print(banner)
 		runSetup()
 		os.Exit(0)
 	}
@@ -45,8 +45,49 @@ func main() {
 	providerFlag := flag.String("provider", "", "AI provider to use")
 	flag.Parse()
 
-	// remaining args after flags = the command to run
 	cmdArgs := flag.Args()
+
+	var errorText string
+
+	if len(cmdArgs) > 0 {
+		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+		cmd.Stdin = nil
+		cmd.Stdout = os.Stdout // stream output live to terminal
+		cmd.Stderr = os.Stderr // stream stderr live to terminal
+
+		runErr := cmd.Run()
+
+		// command succeeded — behave as if welp wasn't there
+		if runErr == nil {
+			os.Exit(0)
+		}
+
+		// command failed — now capture output for AI
+		// re-run silently to capture combined output for AI context
+		cmd2 := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+		cmd2.Stdin = nil
+		out, _ := cmd2.CombinedOutput()
+		errorText = strings.TrimSpace(string(out))
+
+		if errorText == "" {
+			fmt.Fprintf(os.Stderr, "Command failed with no output.\n")
+			os.Exit(1)
+		}
+	} else {
+		// pipe mode — only triggers if stdin has content
+		var err error
+		errorText, err = readStdin()
+		if err != nil || strings.TrimSpace(errorText) == "" {
+			fmt.Fprintln(os.Stderr, "Usage:")
+			fmt.Fprintln(os.Stderr, "  welp <command> [args...]")
+			fmt.Fprintln(os.Stderr, "  <command> 2>&1 | welp")
+			os.Exit(1)
+		}
+	}
+
+	// only reach here if something went wrong — now show welp UI
+	fmt.Print(banner)
+	startTime := time.Now()
 
 	config := loadConfig()
 	detectedSources := DetectAvailableCredentials()
@@ -60,7 +101,6 @@ func main() {
 		PrintDetectedCredentials(detectedSources)
 	}
 
-	// resolve provider
 	if *providerFlag == "" {
 		if os.Getenv("ANTHROPIC_API_KEY") != "" {
 			*providerFlag = "anthropic"
@@ -74,45 +114,6 @@ func main() {
 			*providerFlag = detectedSources[0].ProviderName
 		} else {
 			fmt.Fprintln(os.Stderr, "No AI provider configured. Run 'welp setup'.")
-			os.Exit(1)
-		}
-	}
-
-	var errorText string
-
-	if len(cmdArgs) > 0 {
-		// mode 1: welp <command> [args...]
-		// run the command, capture stdout+stderr, use output as error text
-		fmt.Printf("Running: %s\n\n", strings.Join(cmdArgs, " "))
-
-		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		cmd.Stdin = os.Stdin
-
-		// capture both stdout and stderr
-		out, _ := cmd.CombinedOutput()
-		outputStr := strings.TrimSpace(string(out))
-
-		// print the command output so user sees it
-		if outputStr != "" {
-			fmt.Println(outputStr)
-			fmt.Println()
-		}
-
-		// only proceed if there was actual output to analyse
-		if outputStr == "" {
-			fmt.Println("Command produced no output.")
-			os.Exit(0)
-		}
-
-		errorText = outputStr
-	} else {
-		// mode 2: <command> 2>&1 | welp  (legacy pipe mode)
-		var err error
-		errorText, err = readStdin()
-		if err != nil || strings.TrimSpace(errorText) == "" {
-			fmt.Fprintln(os.Stderr, "Usage:")
-			fmt.Fprintln(os.Stderr, "  welp <command> [args...]     # recommended")
-			fmt.Fprintln(os.Stderr, "  <command> 2>&1 | welp        # pipe mode")
 			os.Exit(1)
 		}
 	}
@@ -132,11 +133,11 @@ func main() {
 				if source.ProviderName == *providerFlag {
 					continue
 				}
-				altProvider, err := providers.CreateProvider(source.ProviderName)
-				if err != nil {
+				altProvider, aerr := providers.CreateProvider(source.ProviderName)
+				if aerr != nil {
 					continue
 				}
-				if err := altProvider.ValidateAPIKeyWithConfig(config); err == nil {
+				if aerr := altProvider.ValidateAPIKeyWithConfig(config); aerr == nil {
 					fmt.Printf("✓ Using %s instead\n\n", source.Description)
 					provider = altProvider
 					goto providerValid
@@ -151,8 +152,10 @@ func main() {
 providerValid:
 	if err := provider.StreamResponseWithConfig(errorText, *contextFlag, sysCtx, config); err != nil {
 		fmt.Fprintf(os.Stderr, "Error calling %s API: %v\n", provider.GetName(), err)
+		fmt.Fprintf(os.Stderr, "⏱️  Failed after %v\n", time.Since(startTime).Round(time.Millisecond))
 		os.Exit(1)
 	}
 
+	fmt.Printf("\n⏱️  %v\n", time.Since(startTime).Round(time.Millisecond))
 	os.Exit(0)
 }
