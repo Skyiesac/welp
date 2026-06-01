@@ -73,7 +73,7 @@ func (c *CopilotProvider) streamFromModelsAPI(prompt string) error {
         },
     },
 }
-//   fmt.Print(payload)
+  fmt.Print(payload)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err

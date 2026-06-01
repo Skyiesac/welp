@@ -10,7 +10,18 @@ type SystemContext struct {
 	OS          string
 	Shell       string
 	CWD         string
-	HistoryCmds []string
+	// RecentCommands holds the last few commands from the shell history
+	RecentCommands []RecentCommand
+	// CurrentCommand is the command being analyzed (the one that produced the error)
+	CurrentCommand string
+	// CurrentOutput is the captured output of the current command (may be omitted for large install outputs)
+	CurrentOutput string
+}
+
+// RecentCommand represents a historical command and an optional captured output
+type RecentCommand struct {
+	Command string
+	Output  string
 }
 
 // Config stores API keys and the preferred provider
@@ -82,8 +93,10 @@ func CreateProvider(providerName string) (AIProvider, error) {
 func BuildPrompt(errorText, context string, sysCtx SystemContext) string {
 	return fmt.Sprintf(`OS: %s | Shell: %s | CWD: %s | Recent: %s
 
+CURRENT COMMAND: %s
 ERROR:
 %s
+
 %s
 
 RULES (non-negotiable):
@@ -94,23 +107,37 @@ RULES (non-negotiable):
 
 FORMAT:
 Fix:
-  <command 1>
-  <command 2 if needed>
+	<command 1>
+	<command 2 if needed>
 Why: <one line explanation>`,
 
 		sysCtx.OS,
 		sysCtx.Shell,
 		sysCtx.CWD,
-		formatRecentCommands(sysCtx.HistoryCmds),
+		formatRecentCommands(sysCtx.RecentCommands),
+		sysCtx.CurrentCommand,
+		sysCtx.CurrentOutput,
 		errorText,
 		buildContextBlock(context),
 	)
 }
-func formatRecentCommands(cmds []string) string {
+func formatRecentCommands(cmds []RecentCommand) string {
 	if len(cmds) == 0 {
 		return "none"
 	}
-	return strings.Join(cmds, "; ")
+	var parts []string
+	for _, c := range cmds {
+		if c.Output != "" {
+			out := strings.ReplaceAll(c.Output, "\n", " ")
+			if len(out) > 200 {
+				out = out[:200] + "..."
+			}
+			parts = append(parts, fmt.Sprintf("%s => %s", c.Command, out))
+		} else {
+			parts = append(parts, c.Command)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func buildContextBlock(context string) string {

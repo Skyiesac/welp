@@ -48,8 +48,10 @@ func main() {
 	cmdArgs := flag.Args()
 
 	var errorText string
+	var currentCommand string
 
 	if len(cmdArgs) > 0 {
+		currentCommand = strings.Join(cmdArgs, " ")
 		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 		cmd.Stdin = nil
 		cmd.Stdout = os.Stdout // stream output live to terminal
@@ -74,6 +76,7 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
+		currentCommand = "pipe input"
 		// pipe mode — only triggers if stdin has content
 		var err error
 		errorText, err = readStdin()
@@ -119,6 +122,22 @@ func main() {
 	}
 
 	sysCtx := collectContextInParallel()
+
+	// populate current command and output for context, then persist the rolling log
+	if currentCommand != "" {
+		sysCtx.CurrentCommand = currentCommand
+		if shouldStoreOutput(currentCommand, errorText) {
+			sysCtx.CurrentOutput = errorText
+		} else {
+			sysCtx.CurrentOutput = ""
+		}
+
+		sysCtx.RecentCommands = appendRecentCommand(sysCtx.RecentCommands, providers.RecentCommand{
+			Command: sysCtx.CurrentCommand,
+			Output:  sysCtx.CurrentOutput,
+		})
+		saveRecentCommands(sysCtx.RecentCommands)
+	}
 
 	provider, err := providers.CreateProvider(*providerFlag)
 	if err != nil {

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 
 	"runtime"
 	"strings"
@@ -36,7 +38,7 @@ func collectContextInParallel() providers.SystemContext {
 
 	go func() {
 		defer wg.Done()
-		sysCtx.HistoryCmds = getLastCommands()
+		sysCtx.RecentCommands = loadRecentCommands()
 	}()
 
 	wg.Wait()
@@ -59,7 +61,50 @@ func getCWD() string {
 	return cwd
 }
 
-func getLastCommands() []string {
+func loadRecentCommands() []providers.RecentCommand {
+	historyCmds := getLastShellCommands()
+	storedCmds := loadStoredRecentCommands()
+	outputByCommand := map[string]string{}
+	for _, cmd := range storedCmds {
+		if cmd.Command == "" || cmd.Output == "" {
+			continue
+		}
+		outputByCommand[cmd.Command] = cmd.Output
+	}
+
+	if len(historyCmds) == 0 {
+		return storedCmds
+	}
+
+	cmds := make([]providers.RecentCommand, 0, len(historyCmds))
+	for _, command := range historyCmds {
+		cmds = append(cmds, providers.RecentCommand{
+			Command: command,
+			Output:  outputByCommand[command],
+		})
+	}
+	return cmds
+}
+
+func loadStoredRecentCommands() []providers.RecentCommand {
+	path := getRecentCommandsPath()
+	if path == "" {
+		return []providers.RecentCommand{}
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return []providers.RecentCommand{}
+	}
+
+	var cmds []providers.RecentCommand
+	if err := json.Unmarshal(data, &cmds); err != nil {
+		return []providers.RecentCommand{}
+	}
+	return cmds
+}
+
+func getLastShellCommands() []string {
 	histFile := os.Getenv("HISTFILE")
 	if histFile == "" {
 		histFile = os.Getenv("HOME") + "/.bash_history"
@@ -79,6 +124,62 @@ func getLastCommands() []string {
 		}
 	}
 	return cmds
+}
+
+func saveRecentCommands(cmds []providers.RecentCommand) {
+	path := getRecentCommandsPath()
+	if path == "" {
+		return
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+
+	data, err := json.MarshalIndent(cmds, "", "  ")
+	if err != nil {
+		return
+	}
+
+	_ = os.WriteFile(path, data, 0600)
+}
+
+func appendRecentCommand(cmds []providers.RecentCommand, current providers.RecentCommand) []providers.RecentCommand {
+	cmds = append(cmds, current)
+	if len(cmds) > 4 {
+		cmds = cmds[len(cmds)-4:]
+	}
+	return cmds
+}
+
+func getRecentCommandsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".welp", "recent-commands.json")
+}
+
+func shouldStoreOutput(command string, output string) bool {
+	if output == "" {
+		return false
+	}
+	if len(output) > 20000 && looksLikeInstallCommand(command) {
+		return false
+	}
+	return true
+}
+
+func looksLikeInstallCommand(command string) bool {
+	command = strings.ToLower(command)
+	installKeywords := []string{" install ", " install", "install ", "install", "upgrade", "add ", "add", "get ", " get "}
+	for _, keyword := range installKeywords {
+		if strings.Contains(command, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 // readStdin reads all input from stdin
