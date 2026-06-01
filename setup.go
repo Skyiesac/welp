@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/manifoldco/promptui"
 	"welp/providers"
 )
 
@@ -53,10 +54,9 @@ func runSetup() {
 		config.Providers = make(map[string]string)
 	}
 
-	fmt.Println("\n=== welp Setup ===\n")
-	if exe, err := os.Executable(); err == nil {
-		fmt.Printf("Binary: %s\n", exe)
-		fmt.Println("(Run `./install.sh` after `go build` to update ~/.local/bin/welp)\n")
+	// fmt.Println("\n=== welp Setup ===\n")
+	if _, err := os.Executable(); err == nil {
+		fmt.Println("\n(Run `./install.sh` after `go build` to update ~/.local/bin/welp)\n")
 	}
 	fmt.Println("Scanning for available AI tools...\n")
 
@@ -68,6 +68,14 @@ func runSetup() {
 		fmt.Println("✓ GitHub Copilot API configuration detected!")
 		if promptYesNo("  Use GitHub Copilot for welp? (y/n): ") {
 			selectedProvider = "copilot"
+			// Ask for model selection for copilot
+			if config.ProviderModels == nil {
+				config.ProviderModels = make(map[string]string)
+			}
+			model := promptCopilotModel()
+			if model != "" {
+				config.ProviderModels["copilot"] = model
+			}
 		}
 	} else {
 		fmt.Println("✗ GitHub Copilot API configuration not found")
@@ -215,4 +223,62 @@ func isOllamaFound() bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// promptCopilotModel asks the user to select a model with arrow key UI
+func promptCopilotModel() string {
+	fmt.Println("\n  Fetching available models from GitHub Models API...")
+	models, err := providers.FetchAvailableCopilotModels()
+	if err != nil {
+		fmt.Printf("  ⚠️  Could not fetch models: %v\n", err)
+		fmt.Println("  Using default model: openai/gpt-4o")
+		return "openai/gpt-4o"
+	}
+
+	if len(models) == 0 {
+		fmt.Println("  ⚠️  No models found")
+		return "openai/gpt-4o"
+	}
+
+	// Find default model index (gpt-4o or first model)
+	defaultIdx := 0
+	for i, m := range models {
+		if strings.Contains(m, "gpt-4o") && !strings.Contains(m, "gpt-4-turbo") {
+			defaultIdx = i
+			break
+		}
+	}
+
+	// Use promptui for arrow-key selection
+	prompt := promptui.Select{
+		Label: "Select GitHub Models (use ↑↓ arrow keys, press Enter to select)",
+		Items: models,
+		Size:  10,
+	}
+
+	// Set cursor position to default
+	prompt.CursorPos = defaultIdx
+
+	idx, _, err := prompt.Run()
+
+	// Handle cancellation (Ctrl+C)
+	if err != nil {
+		if err == promptui.ErrInterrupt {
+			fmt.Println("  ⚠️  Selection cancelled, using default model: openai/gpt-4o")
+			return "openai/gpt-4o"
+		}
+		fmt.Printf("  ⚠️  Selection error: %v\n", err)
+		fmt.Println("  Using default model: openai/gpt-4o")
+		return "openai/gpt-4o"
+	}
+
+	// Validate index
+	if idx < 0 || idx >= len(models) {
+		fmt.Printf("  ⚠️  Invalid selection, using default model: openai/gpt-4o\n")
+		return "openai/gpt-4o"
+	}
+
+	selected := models[idx]
+	fmt.Printf("  ✓ Model selected: %s\n", selected)
+	return selected
 }

@@ -2,14 +2,17 @@ package providers
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -23,6 +26,7 @@ const (
 type CopilotProvider struct {
 	oauthToken string
 	httpClient *http.Client
+	model      string
 }
 
 func (c *CopilotProvider) GetName() string {
@@ -48,24 +52,43 @@ func (c *CopilotProvider) StreamResponse(errorText, context string, sysCtx Syste
 }
 
 func (c *CopilotProvider) StreamResponseWithConfig(errorText, context string, sysCtx SystemContext, config *Config) error {
+	// Read model from config if available
+	if config != nil && config.ProviderModels != nil {
+		if model, ok := config.ProviderModels["copilot"]; ok && model != "" {
+			c.model = model
+		}
+	}
+	// Use default if not set
+	if c.model == "" {
+		c.model = githubModelsModel
+	}
 	return c.stream(errorText, context, sysCtx)
 }
 
 func (c *CopilotProvider) stream(errorText, context string, sysCtx SystemContext) error {
 	prompt := BuildPrompt(errorText, context, sysCtx)
-	return c.streamFromModelsAPI(prompt)
+	
+	// Create a cancellable context for the streaming request
+	ctx, cancel := contextWithSignalCancel()
+	defer cancel()
+	
+	return c.streamFromModelsAPI(ctx, prompt)
 }
 
 // streamFromModelsAPI calls the official GitHub Models inference endpoint.
-func (c *CopilotProvider) streamFromModelsAPI(prompt string) error {
+func (c *CopilotProvider) streamFromModelsAPI(ctx context.Context, prompt string) error {
+	model := c.model
+	if model == "" {
+		model = githubModelsModel
+	}
 	payload := map[string]interface{}{
-    "model":      githubModelsModel,
+    "model":      model,
     "stream":     true,
     "max_tokens": 150,
     "messages": []map[string]string{
         {
             "role":    "system",
-            "content": "You are a terminal error fixer. Reply ONLY in the format: Cause/Fix/Why. One line each. No markdown. No extra text.",
+            "content": "You are a terminal error fixer. Reply only in one line each. No markdown. No extra text.",
         },
         {
             "role":    "user",
@@ -73,13 +96,13 @@ func (c *CopilotProvider) streamFromModelsAPI(prompt string) error {
         },
     },
 }
-  fmt.Print(payload)
+// fmt.Print(payload)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", githubModelsBaseURL+"/chat/completions", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, "POST", githubModelsBaseURL+"/chat/completions", strings.NewReader(string(body)))
 	if err != nil {
 		return err
 	}
@@ -91,6 +114,11 @@ func (c *CopilotProvider) streamFromModelsAPI(prompt string) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		// Check if it was a context cancellation (Ctrl+C)
+		if ctx.Err() == context.Canceled {
+			fmt.Println("\n\n⏹️  Request cancelled by user")
+			return nil
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -102,6 +130,14 @@ func (c *CopilotProvider) streamFromModelsAPI(prompt string) error {
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
+		// Check for cancellation signal
+		select {
+		case <-ctx.Done():
+			fmt.Println("\n\n⏹️  Request cancelled by user")
+			return nil
+		default:
+		}
+
 		line := scanner.Text()
 		if line == "" || line == "data: [DONE]" {
 			continue
@@ -135,6 +171,123 @@ func (c *CopilotProvider) streamFromModelsAPI(prompt string) error {
 func IsGitHubCopilotAvailable() bool {
 	_, err := readGitHubOAuthToken()
 	return err == nil
+}
+
+// contextWithSignalCancel creates a context that cancels on SIGINT (Ctrl+C)
+func contextWithSignalCancel() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigChan
+		_ = sig // Use sig to avoid unused variable warning
+		cancel()
+	}()
+
+	return ctx, cancel
+}
+
+// FetchAvailableModels fetches the list of available models from the GitHub Models catalog
+func FetchAvailableModels() (map[string]string, error) {
+	token, err := readGitHubOAuthToken()
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", "https://models.github.ai/catalog/models", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("catalog API error (status %d)", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var models []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+
+	if err := json.Unmarshal(body, &models); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]string)
+	for _, m := range models {
+		if m.ID != "" && m.Name != "" {
+			result[m.ID] = m.Name
+		}
+	}
+
+	return result, nil
+}
+
+// FetchAvailableCopilotModels fetches available models and returns as slice for setup UI
+func FetchAvailableCopilotModels() ([]string, error) {
+	token, err := readGitHubOAuthToken()
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", "https://models.github.ai/catalog/models", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("catalog API error (status %d)", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var models []struct {
+		ID string `json:"id"`
+	}
+
+	if err := json.Unmarshal(body, &models); err != nil {
+		return nil, err
+	}
+
+	var result []string
+	for _, m := range models {
+		if m.ID != "" {
+			result = append(result, m.ID)
+		}
+	}
+
+	return result, nil
 }
 
 // readGitHubOAuthToken reads a token from env vars, hosts.yml, or gh CLI.

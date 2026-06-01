@@ -6,8 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-
-	"runtime"
+	// "runtime"
 	"strings"
 	"sync"
 
@@ -23,7 +22,7 @@ func collectContextInParallel() providers.SystemContext {
 
 	go func() {
 		defer wg.Done()
-		sysCtx.OS = runtime.GOOS
+		sysCtx.OS = getDistro() 
 	}()
 
 	go func() {
@@ -180,6 +179,20 @@ func looksLikeInstallCommand(command string) bool {
 		}
 	}
 	return false
+}
+
+func getDistro() string {
+	data, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return "unknown"
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "PRETTY_NAME=") {
+			val := strings.TrimPrefix(line, "PRETTY_NAME=")
+			return strings.Trim(val, "\"")
+		}
+	}
+	return "unknown"
 }
 
 // readStdin reads all input from stdin

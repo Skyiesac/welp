@@ -12,10 +12,12 @@ import (
 )
 
 const banner = `
-╔══════════════════════════════════════╗
-║          welp - CLI Tool           ║
-║   Error Analysis and Fixing Utility  ║
-╚══════════════════════════════════════╝
+               .__          
+__  _  __ ____ |  | ______  
+\ \/ \/ // __ \|  | \____ \ 
+ \     /\  ___/|  |_|  |_> >
+  \/\_/  \___  >____/   __/ 
+             \/     |__|    
 `
 
 func hasEnvironmentKeys() bool {
@@ -89,7 +91,6 @@ func main() {
 	}
 
 	// only reach here if something went wrong — now show welp UI
-	fmt.Print(banner)
 	startTime := time.Now()
 
 	config := loadConfig()

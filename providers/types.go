@@ -28,6 +28,7 @@ type RecentCommand struct {
 type Config struct {
 	DefaultProvider string            `json:"default_provider,omitempty"`
 	Providers       map[string]string `json:"providers"`
+	ProviderModels  map[string]string `json:"provider_models,omitempty"`
 }
 
 // AIProvider is the interface that all AI providers must implement
@@ -65,31 +66,7 @@ func CreateProvider(providerName string) (AIProvider, error) {
 		return nil, fmt.Errorf("unsupported provider: %s (supported: anthropic, openai, gemini, ollama, localai, claude-desktop, copilot)", providerName)
 	}
 }
-// func BuildPrompt(errorText, context string, sysCtx SystemContext) string {
-//     return fmt.Sprintf(`You are an expert terminal error fixer. A developer got this error and needs an immediate fix.
 
-// RULES (non-negotiable):
-// - Never ask clarifying questions. Ever.
-// - If you are uncertain, give the 2-3 most likely fixes ranked by probability
-// - Assume the most common/likely cause of this error
-// - Always give a concrete runnable command, even if guessing
-// - Format: one line root cause → fix command(s) → one line why
-
-// RESPONSE FORMAT:
-// Cause: <what went wrong in one line>
-// Fix:
-//   <command 1>
-//   <command 2 if needed>
-// Why: <one line explanation>`,
-//         sysCtx.OS,
-//         sysCtx.Shell,
-//         sysCtx.CWD,
-//         "unknown",
-//         formatRecentCommands(sysCtx.HistoryCmds),
-//         errorText,
-//         buildContextBlock(context),
-//     )
-// }
 func BuildPrompt(errorText, context string, sysCtx SystemContext) string {
 	return fmt.Sprintf(`OS: %s | Shell: %s | CWD: %s | Recent: %s
 
