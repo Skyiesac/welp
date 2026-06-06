@@ -35,6 +35,12 @@ func (o *OllamaProvider) StreamResponse(errorText, context string, sysCtx System
 }
 
 func (o *OllamaProvider) StreamResponseWithConfig(errorText, context string, sysCtx SystemContext, config *Config) error {
+	// Load model from config if not already set
+	if o.Model == "" && config.ProviderModels != nil {
+		if model, exists := config.ProviderModels["ollama"]; exists && model != "" {
+			o.Model = model
+		}
+	}
 	return o.stream(errorText, context, sysCtx)
 }
 
@@ -134,4 +140,36 @@ func getAvailableOllamaModel() (string, error) {
 	}
 
 	return "", fmt.Errorf("no models available")
+}
+
+// GetAllAvailableOllamaModels returns a list of all available Ollama models
+func GetAllAvailableOllamaModels() ([]string, error) {
+	client := &http.Client{}
+	resp, err := client.Get("http://localhost:11434/api/tags")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	var models []string
+	if modelList, ok := result["models"].([]interface{}); ok {
+		for _, m := range modelList {
+			if modelMap, ok := m.(map[string]interface{}); ok {
+				if name, ok := modelMap["name"].(string); ok {
+					models = append(models, name)
+				}
+			}
+		}
+	}
+
+	if len(models) == 0 {
+		return nil, fmt.Errorf("no models available in Ollama")
+	}
+
+	return models, nil
 }

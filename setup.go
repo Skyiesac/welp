@@ -121,6 +121,14 @@ func runSetup() {
 			fmt.Println("✓ Ollama detected (running on localhost:11434)!")
 			if promptYesNo("  Use Ollama for welp? (y/n): ") {
 				selectedProvider = "ollama"
+				// Ask for model selection for Ollama
+				if config.ProviderModels == nil {
+					config.ProviderModels = make(map[string]string)
+				}
+				model := promptOllamaModel()
+				if model != "" {
+					config.ProviderModels["ollama"] = model
+				}
 			}
 		} else {
 			fmt.Println("✗ Ollama not found")
@@ -276,6 +284,57 @@ func promptCopilotModel() string {
 	if idx < 0 || idx >= len(models) {
 		fmt.Printf("  ⚠️  Invalid selection, using default model: openai/gpt-4o\n")
 		return "openai/gpt-4o"
+	}
+
+	selected := models[idx]
+	fmt.Printf("  ✓ Model selected: %s\n", selected)
+	return selected
+}
+
+// promptOllamaModel asks the user to select an Ollama model with arrow key UI
+func promptOllamaModel() string {
+	fmt.Println("\n  Fetching available Ollama models...")
+	models, err := providers.GetAllAvailableOllamaModels()
+	if err != nil {
+		fmt.Printf("  ⚠️  Could not fetch models: %v\n", err)
+		fmt.Println("  Using first available model")
+		return ""
+	}
+
+	if len(models) == 0 {
+		fmt.Println("  ⚠️  No models found")
+		return ""
+	}
+
+	if len(models) == 1 {
+		fmt.Printf("  ✓ Only one model available: %s\n", models[0])
+		return models[0]
+	}
+
+	// Use promptui for arrow-key selection
+	prompt := promptui.Select{
+		Label: "Select Ollama model (use ↑↓ arrow keys, press Enter to select)",
+		Items: models,
+		Size:  10,
+	}
+
+	idx, _, err := prompt.Run()
+
+	// Handle cancellation (Ctrl+C)
+	if err != nil {
+		if err == promptui.ErrInterrupt {
+			fmt.Println("  ⚠️  Selection cancelled, using first available model")
+			return models[0]
+		}
+		fmt.Printf("  ⚠️  Selection error: %v\n", err)
+		fmt.Println("  Using first available model")
+		return models[0]
+	}
+
+	// Validate index
+	if idx < 0 || idx >= len(models) {
+		fmt.Printf("  ⚠️  Invalid selection, using first available model\n")
+		return models[0]
 	}
 
 	selected := models[idx]

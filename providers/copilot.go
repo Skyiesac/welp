@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/fatih/color"
 )
 
 const (
@@ -129,6 +131,10 @@ func (c *CopilotProvider) streamFromModelsAPI(ctx context.Context, prompt string
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
+	buffer := ""
+	fixColor := color.New(color.FgHiGreen, color.Bold)      // Bright/Light Green
+	whyColor := color.New(color.FgHiCyan, color.Bold)       // Bright/Light Cyan
+	
 	for scanner.Scan() {
 		// Check for cancellation signal
 		select {
@@ -159,8 +165,47 @@ func (c *CopilotProvider) streamFromModelsAPI(ctx context.Context, prompt string
 		}
 
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			fmt.Print(chunk.Choices[0].Delta.Content)
+			content := chunk.Choices[0].Delta.Content
+			buffer += content
+			
+			// Process buffer for keywords and print with colors
+			for len(buffer) > 0 {
+				// Check if "Fix:" or "Why:" is at the start of buffer
+				if strings.HasPrefix(buffer, "Fix:") {
+					// Print everything before "Fix:" normally
+					fixColor.Print("Fix:")
+					buffer = buffer[4:]
+					break
+				} else if strings.HasPrefix(buffer, "Why:") {
+					// Print everything before "Why:" normally
+					whyColor.Print("Why:")
+					buffer = buffer[4:]
+					break
+				} else if idx := strings.Index(buffer, "Fix:"); idx != -1 {
+					// Print content before "Fix:" and then "Fix:" with color
+					fmt.Print(buffer[:idx])
+					fixColor.Print("Fix:")
+					buffer = buffer[idx+4:]
+				} else if idx := strings.Index(buffer, "Why:"); idx != -1 {
+					// Print content before "Why:" and then "Why:" with color
+					fmt.Print(buffer[:idx])
+					whyColor.Print("Why:")
+					buffer = buffer[idx+4:]
+				} else {
+					// No keyword found, print all but keep last few chars in case keyword is split
+					if len(buffer) > 10 {
+						fmt.Print(buffer[:len(buffer)-10])
+						buffer = buffer[len(buffer)-10:]
+					}
+					break
+				}
+			}
 		}
+	}
+	
+	// Print any remaining buffer
+	if buffer != "" {
+		fmt.Print(buffer)
 	}
 
 	fmt.Println()
