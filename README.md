@@ -192,8 +192,7 @@ Config is saved to `~/.config/welp/config.json`. You generally don't need to edi
 
 Pull requests are welcome. To add a new provider, implement the provider interface in the `providers/` directory. The existing implementations (Anthropic, OpenAI, Gemini, Copilot, Ollama, LocalAI) are good references for the expected shape.
 
+Give it a ⭐ if you like it :)
 ---
 
-## License
 
-MIT
