@@ -20,6 +20,18 @@ __  _  __ ____ |  | ______
              \/     |__|    
 `
 
+func formatOutputWithBanner(timeStr, providerStr string) string {
+	timeInfo := fmt.Sprintf("Time:  %s | Using: %s", timeStr, providerStr)
+	const terminalWidth = 80
+	const welpText = "WELP"
+		spacing := terminalWidth - len(timeInfo) - len(welpText)
+	if spacing < 5 {
+		spacing = 5 
+	}
+	
+	return timeInfo + strings.Repeat("   ", spacing/3) + welpText
+}
+
 func hasEnvironmentKeys() bool {
 	if os.Getenv("ANTHROPIC_API_KEY") != "" ||
 		os.Getenv("OPENAI_API_KEY") != "" ||
@@ -79,7 +91,6 @@ func main() {
 		}
 	} else {
 		currentCommand = "pipe input"
-		// pipe mode — only triggers if stdin has content
 		var err error
 		errorText, err = readStdin()
 		if err != nil || strings.TrimSpace(errorText) == "" {
@@ -89,8 +100,6 @@ func main() {
 			os.Exit(1)
 		}
 	}
-
-	// only reach here if something went wrong — now show welp UI
 	startTime := time.Now()
 
 	config := loadConfig()
@@ -99,10 +108,6 @@ func main() {
 	if !isConfigured(config) {
 		fmt.Println("No AI provider configured. Run: welp setup")
 		os.Exit(1)
-	}
-
-	if len(detectedSources) > 0 {
-		PrintDetectedCredentials(detectedSources)
 	}
 
 	if *providerFlag == "" {
@@ -176,6 +181,6 @@ providerValid:
 		os.Exit(1)
 	}
 
-	fmt.Printf("\n⏱️  %v\n", time.Since(startTime).Round(time.Millisecond))
+	fmt.Print("\n" + formatOutputWithBanner(time.Since(startTime).Round(time.Millisecond).String(), provider.GetName()))
 	os.Exit(0)
 }

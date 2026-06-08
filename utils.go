@@ -3,12 +3,15 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	// "regexp"
 	// "runtime"
 	"strings"
 	"sync"
+	"unicode"
 
 	"welp/providers"
 )
@@ -209,4 +212,94 @@ func readStdin() (string, error) {
 	}
 
 	return strings.Join(lines, "\n"), nil
+}
+
+// ValidateAPIKey validates an API key for a given provider
+// Returns an error if the key is invalid
+func ValidateAPIKey(provider, key string) error {
+	key = strings.TrimSpace(key)
+
+	// Check if key is empty
+	if key == "" {
+		return fmt.Errorf("API key cannot be empty")
+	}
+
+	// Check for only spaces or special characters that don't look like a key
+	if isOnlySpaces(key) {
+		return fmt.Errorf("API key cannot contain only spaces")
+	}
+
+	// Check minimum length (most API keys are at least 20 characters)
+	if len(key) < 8 {
+		return fmt.Errorf("API key is too short (minimum 8 characters)")
+	}
+
+	// Provider-specific validation
+	switch strings.ToLower(provider) {
+	case "anthropic":
+		if !strings.HasPrefix(key, "sk-ant-") {
+			return fmt.Errorf("Anthropic API key should start with 'sk-ant-'")
+		}
+		if len(key) < 15 {
+			return fmt.Errorf("Anthropic API key appears to be invalid (too short)")
+		}
+		// Check for mostly letters only (should have mix of chars)
+		if isMostlyLetters(key) {
+			return fmt.Errorf("Anthropic API key appears to contain only letters - please verify")
+		}
+
+	case "openai":
+		if !strings.HasPrefix(key, "sk-") {
+			return fmt.Errorf("OpenAI API key should start with 'sk-'")
+		}
+		if len(key) < 20 {
+			return fmt.Errorf("OpenAI API key appears to be invalid (too short)")
+		}
+		// Check for mostly letters only
+		if isMostlyLetters(key) {
+			return fmt.Errorf("OpenAI API key appears to contain only letters - please verify")
+		}
+
+	case "gemini":
+		// Gemini keys are typically long alphanumeric strings, no strict prefix
+		if len(key) < 30 {
+			return fmt.Errorf("Gemini API key appears to be invalid (too short)")
+		}
+		// Check if it's just random letters
+		if isOnlyLetters(key) {
+			return fmt.Errorf("Gemini API key should not contain only letters")
+		}
+	}
+
+	return nil
+}
+
+// isOnlySpaces checks if a string contains only whitespace
+func isOnlySpaces(s string) bool {
+	return strings.TrimSpace(s) == ""
+}
+
+// isOnlyLetters checks if a string contains only letters (no numbers, no special chars)
+func isOnlyLetters(s string) bool {
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// isMostlyLetters checks if a string is mostly letters (>80% letters)
+func isMostlyLetters(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	letterCount := 0
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			letterCount++
+		}
+	}
+	percentage := float64(letterCount) / float64(len(s))
+	return percentage > 0.8
 }

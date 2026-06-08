@@ -97,6 +97,8 @@ func (g *GeminiProvider) stream(apiKey, errorText, context string, sysCtx System
 
 func parseGeminiStream(body io.Reader) error {
 	scanner := bufio.NewScanner(body)
+	printer := NewColorPrinter()
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -114,7 +116,7 @@ func parseGeminiStream(body io.Reader) error {
 					if parts, ok := content["parts"].([]interface{}); ok && len(parts) > 0 {
 						if part, ok := parts[0].(map[string]interface{}); ok {
 							if text, ok := part["text"].(string); ok {
-								fmt.Print(text)
+								printer.Write(text)
 							}
 						}
 					}
@@ -123,6 +125,7 @@ func parseGeminiStream(body io.Reader) error {
 		}
 	}
 
+	printer.Flush()
 	fmt.Println()
 	return scanner.Err()
 }

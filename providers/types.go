@@ -3,13 +3,15 @@ package providers
 import (
 	"fmt"
 	"strings"
+
+	"github.com/fatih/color"
 )
 
 // SystemContext holds system information for the prompt
 type SystemContext struct {
-	OS          string
-	Shell       string
-	CWD         string
+	OS    string
+	Shell string
+	CWD   string
 	// RecentCommands holds the last few commands from the shell history
 	RecentCommands []RecentCommand
 	// CurrentCommand is the command being analyzed (the one that produced the error)
@@ -68,36 +70,38 @@ func CreateProvider(providerName string) (AIProvider, error) {
 }
 
 func BuildPrompt(errorText, context string, sysCtx SystemContext) string {
-	return fmt.Sprintf(`OS: %s | Shell: %s | CWD: %s | Recent: %s
+	contextStr := ""
+	if context != "" {
+		contextStr = fmt.Sprintf("\nCONTEXT: %s", context)
+	}
 
-CURRENT COMMAND: %s
+	return fmt.Sprintf(`OS: %s | Shell: %s | CWD: %s
+
+COMMAND: %s
 ERROR:
-%s
-
-%s
+%s%s
 
 RULES (non-negotiable):
-- Never ask clarifying questions. Ever.
-- Assume the most common/likely cause of this error
+- Never ask clarifying questions, no preamable , no note. Ever.
+- Assume the most common/likely cause of this error. The "Why:" explanation MUST be a single sentence on exactly one line.
 - Always give a concrete runnable command, even if guessing
--In next line,  give a follow up concrete command in case first fails or as a follow up depending on the situation
+- In next line, give a follow up concrete command in case first fails or as a follow up depending on the situation
 
-FORMAT:
+FORMAT Template:
 Fix:
 	<command 1>
 	<command 2 if needed>
-Why: <one line explanation>`,
+Why: <strictly one line explanation>`,
 
 		sysCtx.OS,
 		sysCtx.Shell,
 		sysCtx.CWD,
-		formatRecentCommands(sysCtx.RecentCommands),
 		sysCtx.CurrentCommand,
 		sysCtx.CurrentOutput,
-		errorText,
-		buildContextBlock(context),
+		contextStr,
 	)
 }
+
 func formatRecentCommands(cmds []RecentCommand) string {
 	if len(cmds) == 0 {
 		return "none"
@@ -117,9 +121,85 @@ func formatRecentCommands(cmds []RecentCommand) string {
 	return strings.Join(parts, "; ")
 }
 
-func buildContextBlock(context string) string {
-    if context == "" {
-        return "EXTRA CONTEXT: none — make reasonable assumptions based on the error alone"
-    }
-    return fmt.Sprintf("EXTRA CONTEXT: %s", context)
+// PrintWithColors prints text with colored "Fix:" and "Why:" keywords
+func PrintWithColors(text string) {
+	printer := NewColorPrinter()
+	printer.Write(text)
+	printer.Flush()
+}
+
+type ColorPrinter struct {
+	buffer   string
+	fixColor *color.Color
+	whyColor *color.Color
+}
+
+func NewColorPrinter() *ColorPrinter {
+	return &ColorPrinter{
+		fixColor: color.New(color.FgHiGreen, color.Bold),
+		whyColor: color.New(color.FgHiCyan, color.Bold),
+	}
+}
+
+func (p *ColorPrinter) Write(text string) {
+	p.buffer += text
+	p.print(false)
+}
+
+func (p *ColorPrinter) Flush() {
+	p.print(true)
+}
+
+func (p *ColorPrinter) print(flush bool) {
+	for len(p.buffer) > 0 {
+		if strings.HasPrefix(p.buffer, "Fix:") {
+			p.fixColor.Print("Fix:")
+			p.buffer = p.buffer[4:]
+			continue
+		}
+		if strings.HasPrefix(p.buffer, "Why:") {
+			p.whyColor.Print("Why:")
+			p.buffer = p.buffer[4:]
+			continue
+		}
+
+		fixIdx := strings.Index(p.buffer, "Fix:")
+		whyIdx := strings.Index(p.buffer, "Why:")
+		nextIdx := -1
+		if fixIdx != -1 && (whyIdx == -1 || fixIdx < whyIdx) {
+			nextIdx = fixIdx
+		} else if whyIdx != -1 {
+			nextIdx = whyIdx
+		}
+
+		if nextIdx == -1 {
+			printLen := len(p.buffer)
+			if !flush {
+				printLen -= colorKeywordOverlap(p.buffer)
+			}
+			if printLen <= 0 {
+				return
+			}
+			fmt.Print(p.buffer[:printLen])
+			p.buffer = p.buffer[printLen:]
+			continue
+		}
+
+		if nextIdx > 0 {
+			fmt.Print(p.buffer[:nextIdx])
+			p.buffer = p.buffer[nextIdx:]
+		}
+	}
+}
+
+func colorKeywordOverlap(text string) int {
+	maxOverlap := 0
+	for _, keyword := range []string{"Fix:", "Why:"} {
+		for i := 1; i < len(keyword) && i <= len(text); i++ {
+			if strings.HasSuffix(text, keyword[:i]) && i > maxOverlap {
+				maxOverlap = i
+			}
+		}
+	}
+	return maxOverlap
 }

@@ -2,6 +2,7 @@ package providers
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,19 +54,47 @@ func (c *ClaudeDesktopProvider) stream(errorText, context string, sysCtx SystemC
 	// The CLI is invoked as: claude <prompt>
 	cmd := exec.Command(c.CLIPath)
 	cmd.Stdin = nil
-	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to read Claude Desktop output: %w", err)
+	}
 
 	// Set the prompt as environment variable or pass via stdin
 	cmd.Env = append(os.Environ(), "CLAUDE_PROMPT="+prompt)
 
-	// Execute the command
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to call Claude Desktop: %w", err)
 	}
 
+	printer := NewColorPrinter()
+	if err := streamColored(stdout, printer); err != nil {
+		return fmt.Errorf("failed to read Claude Desktop output: %w", err)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("failed to call Claude Desktop: %w", err)
+	}
+
+	printer.Flush()
 	return nil
+}
+
+func streamColored(reader io.Reader, printer *ColorPrinter) error {
+	buffer := make([]byte, 4096)
+	for {
+		n, err := reader.Read(buffer)
+		if n > 0 {
+			printer.Write(string(buffer[:n]))
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func findClaudeCLI() (string, error) {

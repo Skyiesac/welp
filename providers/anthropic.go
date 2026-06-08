@@ -53,9 +53,9 @@ func (a *AnthropicProvider) stream(apiKey, errorText, context string, sysCtx Sys
 	prompt := BuildPrompt(errorText, context, sysCtx)
 
 	requestBody := map[string]interface{}{
-		"model":       "claude-3-5-sonnet-20241022",
-		"max_tokens":  1024,
-		"stream":      true,
+		"model":      "claude-3-5-sonnet-20241022",
+		"max_tokens": 1024,
+		"stream":     true,
 		"messages": []map[string]string{
 			{
 				"role":    "user",
@@ -95,6 +95,8 @@ func (a *AnthropicProvider) stream(apiKey, errorText, context string, sysCtx Sys
 
 func parseAnthropicStream(body io.Reader) error {
 	scanner := bufio.NewScanner(body)
+	printer := NewColorPrinter()
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if !bytes.HasPrefix(line, []byte("data: ")) {
@@ -113,11 +115,12 @@ func parseAnthropicStream(body io.Reader) error {
 
 		if delta, ok := event["delta"].(map[string]interface{}); ok {
 			if text, ok := delta["text"].(string); ok {
-				fmt.Print(text)
+				printer.Write(text)
 			}
 		}
 	}
 
+	printer.Flush()
 	fmt.Println()
 	return scanner.Err()
 }

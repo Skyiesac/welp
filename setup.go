@@ -149,16 +149,29 @@ func runSetup() {
 	firstAdded := ""
 
 	for _, provider := range apiProviders {
-		fmt.Printf("Enter API key for %s (press Enter to skip): ", strings.ToUpper(provider))
-		key := readInput()
+		for {
+			fmt.Printf("Enter API key for %s (press Enter to skip): ", strings.ToUpper(provider))
+			key := readInput()
 
-		if key != "" {
+			if key == "" {
+				break
+			}
+
+			// Validate the API key
+			if err := ValidateAPIKey(provider, key); err != nil {
+				fmt.Printf("❌ Invalid API key: %v\n", err)
+				fmt.Printf("   Please try again or press Enter to skip.\n")
+				continue
+			}
+
+			// Valid key - save it
 			config.Providers[provider] = key
 			fmt.Printf("✓ %s API key saved\n", strings.ToUpper(provider))
 			if !addedAny {
 				firstAdded = provider
 			}
 			addedAny = true
+			break
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // OllamaProvider implements AIProvider for Ollama (local LLM)
@@ -74,7 +75,9 @@ func (o *OllamaProvider) stream(errorText, context string, sysCtx SystemContext)
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 120 * time.Second, // 2 minute timeout for Ollama requests
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -91,6 +94,7 @@ func (o *OllamaProvider) stream(errorText, context string, sysCtx SystemContext)
 
 func parseOllamaStream(body io.Reader) error {
 	scanner := bufio.NewScanner(body)
+	printer := NewColorPrinter()
 	for scanner.Scan() {
 		line := scanner.Bytes()
 
@@ -100,16 +104,19 @@ func parseOllamaStream(body io.Reader) error {
 		}
 
 		if response, ok := event["response"].(string); ok {
-			fmt.Print(response)
+			printer.Write(response)
 		}
 	}
 
+	printer.Flush()
 	fmt.Println()
 	return scanner.Err()
 }
 
 func isOllamaRunning() bool {
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
 	resp, err := client.Get("http://localhost:11434/api/tags")
 	if err != nil {
 		return false
@@ -119,7 +126,9 @@ func isOllamaRunning() bool {
 }
 
 func getAvailableOllamaModel() (string, error) {
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 	resp, err := client.Get("http://localhost:11434/api/tags")
 	if err != nil {
 		return "", err
@@ -144,7 +153,9 @@ func getAvailableOllamaModel() (string, error) {
 
 // GetAllAvailableOllamaModels returns a list of all available Ollama models
 func GetAllAvailableOllamaModels() ([]string, error) {
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 	resp, err := client.Get("http://localhost:11434/api/tags")
 	if err != nil {
 		return nil, err

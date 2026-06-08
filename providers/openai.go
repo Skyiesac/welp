@@ -53,9 +53,9 @@ func (o *OpenAIProvider) stream(apiKey, errorText, context string, sysCtx System
 	prompt := BuildPrompt(errorText, context, sysCtx)
 
 	requestBody := map[string]interface{}{
-		"model":       "gpt-4-turbo",
-		"max_tokens":  1024,
-		"stream":      true,
+		"model":      "gpt-4-turbo",
+		"max_tokens": 1024,
+		"stream":     true,
 		"messages": []map[string]string{
 			{
 				"role":    "user",
@@ -94,6 +94,8 @@ func (o *OpenAIProvider) stream(apiKey, errorText, context string, sysCtx System
 
 func parseOpenAIStream(body io.Reader) error {
 	scanner := bufio.NewScanner(body)
+	printer := NewColorPrinter()
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if !bytes.HasPrefix(line, []byte("data: ")) {
@@ -114,13 +116,14 @@ func parseOpenAIStream(body io.Reader) error {
 			if choice, ok := choices[0].(map[string]interface{}); ok {
 				if delta, ok := choice["delta"].(map[string]interface{}); ok {
 					if text, ok := delta["content"].(string); ok {
-						fmt.Print(text)
+						printer.Write(text)
 					}
 				}
 			}
 		}
 	}
 
+	printer.Flush()
 	fmt.Println()
 	return scanner.Err()
 }

@@ -52,7 +52,7 @@ func (l *LocalAIProvider) stream(errorText, context string, sysCtx SystemContext
 
 	// LocalAI uses OpenAI-compatible API
 	requestBody := map[string]interface{}{
-		"model":    l.Model,
+		"model": l.Model,
 		"messages": []map[string]string{
 			{
 				"role":    "user",
@@ -92,6 +92,7 @@ func (l *LocalAIProvider) stream(errorText, context string, sysCtx SystemContext
 
 func parseLocalAIStream(body io.Reader) error {
 	scanner := bufio.NewScanner(body)
+	printer := NewColorPrinter()
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if !bytes.HasPrefix(line, []byte("data: ")) {
@@ -112,13 +113,14 @@ func parseLocalAIStream(body io.Reader) error {
 			if choice, ok := choices[0].(map[string]interface{}); ok {
 				if delta, ok := choice["delta"].(map[string]interface{}); ok {
 					if content, ok := delta["content"].(string); ok {
-						fmt.Print(content)
+						printer.Write(content)
 					}
 				}
 			}
 		}
 	}
 
+	printer.Flush()
 	fmt.Println()
 	return scanner.Err()
 }
