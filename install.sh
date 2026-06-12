@@ -30,30 +30,27 @@ add_shell_integration() {
 	local shell_rc="$1"
 	local marker="# welp shell integration"
 
-	if [ -f "$shell_rc" ]; then
-		if grep -q "$marker" "$shell_rc"; then
-			echo "✓ Shell integration already in $shell_rc"
-			return
-		fi
+	if [ -f "$shell_rc" ] && grep -q "$marker" "$shell_rc"; then
+		tmp_file="$(mktemp)"
+		awk '
+			$0 == "# welp shell integration" { skip=1; next }
+			skip && $0 == "trap __welp_err_trap ERR" { skip=0; next }
+			skip && $0 == "trap '\''__welp_handler'\'' ERR" { skip=0; next }
+			!skip { print }
+		' "$shell_rc" > "$tmp_file"
+		mv "$tmp_file" "$shell_rc"
 	fi
 
 	cat >> "$shell_rc" <<'EOF'
 
 # welp shell integration
 # Automatically run welp on command errors
-__welp_handler() {
-    local exit_code=$?
-    if [ $exit_code -ne 0 ]; then
-        local cmd="${BASH_COMMAND}"
-        if [[ ! "$cmd" =~ ^welp|^echo|^read ]]; then
-            echo "❌ Command failed: $cmd"
-            echo "🔍 Analyzing error..."
-            sleep 0.5
-        fi
-    fi
-    return $exit_code
+__welp_err_trap() {
+    local status=$?
+    [[ $status -eq 130 || $status -eq 143 ]] && return $status
+    echo "$BASH_COMMAND" | timeout --foreground 60 welp 2>/dev/null || true
 }
-trap '__welp_handler' ERR
+trap __welp_err_trap ERR
 EOF
 
 	echo "✓ Added shell integration to $shell_rc"
@@ -71,5 +68,3 @@ echo ""
 echo "Next:"
 echo "  welp setup"
 echo ""
-echo "Test:"
-echo "  pip install nonexistent-package 2>&1 | welp"

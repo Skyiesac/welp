@@ -1,4 +1,4 @@
-module welp
+module github.com/Skyiesac/welp
 
 go 1.25.0
 

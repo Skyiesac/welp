@@ -2,17 +2,14 @@ package providers
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -68,15 +65,11 @@ func (c *CopilotProvider) StreamResponseWithConfig(errorText, context string, sy
 func (c *CopilotProvider) stream(errorText, context string, sysCtx SystemContext) error {
 	prompt := BuildPrompt(errorText, context, sysCtx)
 
-	// Create a cancellable context for the streaming request
-	ctx, cancel := contextWithSignalCancel()
-	defer cancel()
-
-	return c.streamFromModelsAPI(ctx, prompt)
+	return c.streamFromModelsAPI(prompt)
 }
 
 // streamFromModelsAPI calls the official GitHub Models inference endpoint.
-func (c *CopilotProvider) streamFromModelsAPI(ctx context.Context, prompt string) error {
+func (c *CopilotProvider) streamFromModelsAPI(prompt string) error {
 	model := c.model
 	if model == "" {
 		model = githubModelsModel
@@ -96,13 +89,12 @@ func (c *CopilotProvider) streamFromModelsAPI(ctx context.Context, prompt string
 			},
 		},
 	}
-	// fmt.Print(payload)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", githubModelsBaseURL+"/chat/completions", strings.NewReader(string(body)))
+	req, err := http.NewRequest("POST", githubModelsBaseURL+"/chat/completions", strings.NewReader(string(body)))
 	if err != nil {
 		return err
 	}
@@ -114,11 +106,6 @@ func (c *CopilotProvider) streamFromModelsAPI(ctx context.Context, prompt string
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// Check if it was a context cancellation (Ctrl+C)
-		if ctx.Err() == context.Canceled {
-			fmt.Println("\n\n⏹️  Request cancelled by user")
-			return nil
-		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -132,14 +119,6 @@ func (c *CopilotProvider) streamFromModelsAPI(ctx context.Context, prompt string
 	printer := NewColorPrinter()
 
 	for scanner.Scan() {
-		// Check for cancellation signal
-		select {
-		case <-ctx.Done():
-			fmt.Println("\n\n⏹️  Request cancelled by user")
-			return nil
-		default:
-		}
-
 		line := scanner.Text()
 		if line == "" || line == "data: [DONE]" {
 			continue
@@ -174,22 +153,6 @@ func (c *CopilotProvider) streamFromModelsAPI(ctx context.Context, prompt string
 func IsGitHubCopilotAvailable() bool {
 	_, err := readGitHubOAuthToken()
 	return err == nil
-}
-
-// contextWithSignalCancel creates a context that cancels on SIGINT (Ctrl+C)
-func contextWithSignalCancel() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		sig := <-sigChan
-		_ = sig // Use sig to avoid unused variable warning
-		cancel()
-	}()
-
-	return ctx, cancel
 }
 
 // FetchAvailableModels fetches the list of available models from the GitHub Models catalog

@@ -15,7 +15,7 @@ __  _  __ ____ |  | ______
 
 ## How it works
 
-After installation, `welp` adds a shell hook to your `.zshrc` or `.bashrc`. From that point on, every time a command exits with a non-zero status, the hook captures the error output and pipes it to `welp`, which forwards it to your configured AI provider and streams the explanation back to your terminal.
+After setup, `welp` can be wired into your shell through your `.zshrc` or `.bashrc`. From that point on, failed commands can be sent to `welp`, which forwards the error to your configured AI provider and streams the explanation back to your terminal.
 
 You run your commands exactly as you always would. `welp` only speaks up when something breaks.
 
@@ -45,19 +45,12 @@ cd welp
 go build -o welp
 ```
 
-**Install to `~/.local/bin` and add shell integration:**
+**Install to `~/.local/bin`:**
 
 ```bash
-./install.sh
+mkdir -p ~/.local/bin
+cp welp ~/.local/bin/welp
 ```
-
-This does three things:
-
-1. Builds the binary and copies it to `~/.local/bin/welp`
-2. Detects your shell (bash or zsh) and appends the error hook to your shell config
-3. Prints next steps
-
-> Do not run `install.sh` with `sudo`. The binary is installed to your user's local bin, not a system path.
 
 Make sure `~/.local/bin` is in your `PATH`. If it isn't, add this to your shell config:
 
@@ -101,33 +94,35 @@ export GEMINI_API_KEY="AIza..."
 
 `welp` detects these at runtime automatically.
 
+Add the shell integration for your shell:
+
+**Zsh** (`~/.zshrc`):
+
+```zsh
+__welp_accept_line() { [[ -n "$BUFFER" && "$BUFFER" != welp* ]] && BUFFER="welp $BUFFER"; zle .accept-line }
+zle -N accept-line __welp_accept_line
+```
+
+**Bash** (`~/.bashrc`):
+
+```bash
+__welp_err_trap() { local status=$?; [[ $status -eq 130 || $status -eq 143 ]] && return $status; echo "$BASH_COMMAND" | timeout --foreground 60 welp 2>/dev/null || true; }
+trap __welp_err_trap ERR
+```
+
+Then reload your shell:
+
+```bash
+source ~/.zshrc   # or ~/.bashrc
+```
+
 ---
 
 ## Shell integration
 
-The `install.sh` script adds the following hook to your `.zshrc` or `.bashrc`:
+Use the hook for your shell from [Setup](#setup). Once it is active, failed commands will trigger `welp` automatically.
 
-```bash
-# welp shell integration
-__welp_handler() {
-  local exit_code=$?
-  if [ $exit_code -ne 0 ]; then
-    local cmd="${BASH_COMMAND}"
-    if [[ ! "$cmd" =~ ^welp|^echo|^read ]]; then
-      echo "Command failed: $cmd"
-      echo "Analyzing error..."
-      sleep 0.5
-    fi
-  fi
-  return $exit_code
-}
-
-trap '__welp_handler' ERR
-```
-
-Once this is active, any command that fails will trigger `welp` automatically. You do not need to prepend `welp` to anything or change how you work.
-
-If you ever want to remove the integration, delete the block between `# welp shell integration` and the `trap` line from your shell config file.
+If you ever want to remove the integration, delete the hook from your shell config file.
 
 ---
 
@@ -194,5 +189,3 @@ Pull requests are welcome. To add a new provider, implement the provider interfa
 
 Give it a ⭐ if you like it :)
 ---
-
-

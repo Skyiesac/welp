@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"welp/providers"
+	"github.com/Skyiesac/welp/providers"
 )
 
 // loadConfig loads the configuration from file

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Skyiesac/welp/providers"
 	"github.com/manifoldco/promptui"
-	"welp/providers"
 )
 
 func printSetupInstructions() {
@@ -56,9 +56,11 @@ func runSetup() {
 
 	// fmt.Println("\n=== welp Setup ===\n")
 	if _, err := os.Executable(); err == nil {
-		fmt.Println("\n(Run `./install.sh` after `go build` to update ~/.local/bin/welp)\n")
+		fmt.Println("\n(Run `go build -o welp` and copy it to ~/.local/bin/welp to update your installed binary)")
+		fmt.Println()
 	}
-	fmt.Println("Scanning for available AI tools...\n")
+	fmt.Println("Scanning for available AI tools...")
+	fmt.Println()
 
 	selectedProvider := ""
 
@@ -96,7 +98,8 @@ func runSetup() {
 			}
 		} else {
 			fmt.Println("✗ Claude Desktop not found")
-			fmt.Println("  Install from: https://claude.ai/\n")
+			fmt.Println("  Install from: https://claude.ai/")
+			fmt.Println()
 		}
 	}
 
@@ -110,7 +113,8 @@ func runSetup() {
 			}
 		} else {
 			fmt.Println("✗ LocalAI not found")
-			fmt.Println("  Install from: https://localai.io/\n")
+			fmt.Println("  Install from: https://localai.io/")
+			fmt.Println()
 		}
 	}
 
@@ -132,7 +136,8 @@ func runSetup() {
 			}
 		} else {
 			fmt.Println("✗ Ollama not found")
-			fmt.Println("  Install from: https://ollama.ai/\n")
+			fmt.Println("  Install from: https://ollama.ai/")
+			fmt.Println()
 		}
 	}
 
@@ -142,7 +147,8 @@ func runSetup() {
 	}
 
 	// 5. Ask for API keys if no local provider was selected
-	fmt.Println("🔑 No local AI source selected. Configuring API keys...\n")
+	fmt.Println("🔑 No local AI source selected. Configuring API keys...")
+	fmt.Println()
 
 	apiProviders := []string{"anthropic", "openai", "gemini"}
 	addedAny := false

@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 	"time"
 
-	"welp/providers"
+	"github.com/Skyiesac/welp/providers"
 )
 
 // CredentialSource represents where credentials come from
 type CredentialSource struct {
-	Type        string // "env", "config", "ollama", "localai", "claude-desktop", "chatgpt"
+	Type         string // "env", "config", "ollama", "localai", "claude-desktop", "chatgpt"
 	ProviderName string
-	Description string
-	Priority    int // Lower number = higher priority
+	Description  string
+	Priority     int // Lower number = higher priority
 }
 
 // DetectAvailableCredentials checks all possible credential sources

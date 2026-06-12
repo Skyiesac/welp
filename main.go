@@ -1,14 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
+	"io"
 	"os/exec"
+	"os/signal"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
-	"welp/providers"
+	"github.com/Skyiesac/welp/providers"
 )
 
 const banner = `
@@ -20,15 +27,21 @@ __  _  __ ____ |  | ______
              \/     |__|    
 `
 
+var currentCommandMu sync.Mutex
+var currentCommandProcess *os.Process
+var interruptCount atomic.Int32
+var sigChan = make(chan os.Signal, 8)
+var interrupted = make(chan struct{})   // signals main that we were interrupted
+
 func formatOutputWithBanner(timeStr, providerStr string) string {
 	timeInfo := fmt.Sprintf("Time:  %s | Using: %s", timeStr, providerStr)
 	const terminalWidth = 80
 	const welpText = "WELP"
-		spacing := terminalWidth - len(timeInfo) - len(welpText)
+	spacing := terminalWidth - len(timeInfo) - len(welpText)
 	if spacing < 5 {
-		spacing = 5 
+		spacing = 5
 	}
-	
+
 	return timeInfo + strings.Repeat("   ", spacing/3) + welpText
 }
 
@@ -49,6 +62,7 @@ func isConfigured(config *providers.Config) bool {
 }
 
 func main() {
+	installStrictKillHandler()
 	if len(os.Args) > 1 && os.Args[1] == "setup" {
 		fmt.Print(banner)
 		runSetup()
@@ -66,25 +80,20 @@ func main() {
 
 	if len(cmdArgs) > 0 {
 		currentCommand = strings.Join(cmdArgs, " ")
-		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+		var buf bytes.Buffer
+		cmd := newTrackedCommand(cmdArgs[0], cmdArgs[1:]...)
 		cmd.Stdin = nil
-		cmd.Stdout = os.Stdout // stream output live to terminal
-		cmd.Stderr = os.Stderr // stream stderr live to terminal
+		cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
 
-		runErr := cmd.Run()
+		runErr := runTrackedCommand(cmd)
+		exitIfInterrupted(runErr)
 
-		// command succeeded — behave as if welp wasn't there
 		if runErr == nil {
 			os.Exit(0)
 		}
 
-		// command failed — now capture output for AI
-		// re-run silently to capture combined output for AI context
-		cmd2 := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		cmd2.Stdin = nil
-		out, _ := cmd2.CombinedOutput()
-		errorText = strings.TrimSpace(string(out))
-
+		errorText = strings.TrimSpace(buf.String())
 		if errorText == "" {
 			fmt.Fprintf(os.Stderr, "Command failed with no output.\n")
 			os.Exit(1)
@@ -175,12 +184,121 @@ func main() {
 	}
 
 providerValid:
-	if err := provider.StreamResponseWithConfig(errorText, *contextFlag, sysCtx, config); err != nil {
-		fmt.Fprintf(os.Stderr, "Error calling %s API: %v\n", provider.GetName(), err)
-		fmt.Fprintf(os.Stderr, "⏱️  Failed after %v\n", time.Since(startTime).Round(time.Millisecond))
-		os.Exit(1)
+	streamDone := make(chan error, 1)
+	go func() { streamDone <- provider.StreamResponseWithConfig(errorText, *contextFlag, sysCtx, config) }()
+	select {
+	case err := <-streamDone:
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error calling %s API: %v\n", provider.GetName(), err)
+			os.Exit(1)
+		}
+	case <-interrupted:
+		fmt.Println("\ninterrupted.")
+		os.Exit(130)
 	}
 
 	fmt.Print("\n" + formatOutputWithBanner(time.Since(startTime).Round(time.Millisecond).String(), provider.GetName()))
 	os.Exit(0)
+}
+
+func installStrictKillHandler() {
+
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	 go func() {
+        for sig := range sigChan {
+            count := interruptCount.Add(1)
+            if count == 1 {
+                killCurrentCommand()
+                close(interrupted) // notify main
+                if sig == syscall.SIGTERM {
+                    os.Exit(143)
+                }
+                // don't os.Exit here — let main handle it cleanly
+            } else {
+                forceKillSelf() // second Ctrl+C: hard kill
+            }
+        }
+	}()
+}
+
+func forceKillSelf() {
+	if runtime.GOOS == "windows" {
+		os.Exit(130)
+	}
+	_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+	os.Exit(130)
+}
+
+func newTrackedCommand(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
+}
+
+func runTrackedCommand(cmd *exec.Cmd) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	trackCommandProcess(cmd.Process)
+	err := cmd.Wait()
+	clearCommandProcess(cmd.Process)
+	return err
+}
+
+func combinedOutputTrackedCommand(cmd *exec.Cmd) ([]byte, error) {
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	err := runTrackedCommand(cmd)
+	return output.Bytes(), err
+}
+
+func trackCommandProcess(process *os.Process) {
+	currentCommandMu.Lock()
+	currentCommandProcess = process
+	currentCommandMu.Unlock()
+}
+
+func clearCommandProcess(process *os.Process) {
+	currentCommandMu.Lock()
+	if currentCommandProcess == process {
+		currentCommandProcess = nil
+	}
+	currentCommandMu.Unlock()
+}
+
+func killCurrentCommand() {
+	currentCommandMu.Lock()
+	process := currentCommandProcess
+	currentCommandMu.Unlock()
+	if process == nil {
+		return
+	}
+
+	_ = syscall.Kill(-process.Pid, syscall.SIGKILL)
+	_ = process.Kill()
+}
+
+func exitIfInterrupted(err error) {
+	if !wasInterrupted(err) {
+		return
+	}
+	killCurrentCommand()
+	os.Exit(130)
+}
+
+func wasInterrupted(err error) bool {
+	if err == nil {
+		return false
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		return false
+	}
+	status, ok := exitErr.Sys().(syscall.WaitStatus)
+	if !ok {
+		return false
+	}
+	return status.Signaled() && (status.Signal() == syscall.SIGINT || status.Signal() == syscall.SIGTERM)
 }

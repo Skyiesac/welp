@@ -7,13 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	// "regexp"
-	// "runtime"
 	"strings"
 	"sync"
 	"unicode"
 
-	"welp/providers"
+	"github.com/Skyiesac/welp/providers"
 )
 
 // collectContextInParallel gathers OS, shell, cwd, and history concurrently
@@ -25,7 +23,7 @@ func collectContextInParallel() providers.SystemContext {
 
 	go func() {
 		defer wg.Done()
-		sysCtx.OS = getDistro() 
+		sysCtx.OS = getDistro()
 	}()
 
 	go func() {
@@ -215,7 +213,6 @@ func readStdin() (string, error) {
 }
 
 // ValidateAPIKey validates an API key for a given provider
-// Returns an error if the key is invalid
 func ValidateAPIKey(provider, key string) error {
 	key = strings.TrimSpace(key)
 

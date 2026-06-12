@@ -12,7 +12,7 @@ import (
 
 // OllamaProvider implements AIProvider for Ollama (local LLM)
 type OllamaProvider struct {
-	Model string // Default model, can be configured
+	Model string 
 }
 
 func (o *OllamaProvider) GetName() string {
@@ -20,7 +20,6 @@ func (o *OllamaProvider) GetName() string {
 }
 
 func (o *OllamaProvider) ValidateAPIKey() error {
-	// Ollama doesn't require API keys, but needs to be running
 	if !isOllamaRunning() {
 		return fmt.Errorf("Ollama is not running. Start it with: ollama serve")
 	}
@@ -50,7 +49,7 @@ func (o *OllamaProvider) stream(errorText, context string, sysCtx SystemContext)
 		// Try to use commonly available models
 		model, err := getAvailableOllamaModel()
 		if err != nil {
-			return fmt.Errorf("no models available in Ollama. Pull a model first: ollama pull neural-chat")
+			return fmt.Errorf("no models available in Ollama. Pull a model first: ollama pull [model-name]")
 		}
 		o.Model = model
 	}
